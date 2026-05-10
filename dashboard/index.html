@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PR Agent · Live Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #09090f;
+      --surface: #0f0f1a;
+      --border: #1e1e30;
+      --accent: #6c47ff;
+      --accent-glow: rgba(108, 71, 255, 0.3);
+      --green: #00e5a0;
+      --red: #ff4466;
+      --yellow: #ffc233;
+      --text: #e8e8f0;
+      --muted: #5a5a7a;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Syne', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Grid noise texture overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px);
+      opacity: 0.25;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Header ── */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(9, 9, 15, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .logo-dot {
+      width: 8px; height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+
+    .conn-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .conn-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+
+    .conn-dot.live {
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .conn-dot.error { background: var(--red); }
+
+    /* ── Layout ── */
+    main {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      grid-template-rows: auto 1fr;
+      gap: 0;
+      height: calc(100vh - 60px);
+    }
+
+    /* ── Stats strip ── */
+    .stats-strip {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat {
+      padding: 1.2rem 1.5rem;
+      border-right: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat:last-child { border-right: none; }
+
+    .stat-label {
+      font-size: 0.62rem;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 0.4rem;
+    }
+
+    .stat-value {
+      font-family: var(--sans);
+      font-size: 2rem;
+      font-weight: 800;
+      line-height: 1;
+      transition: color 0.3s;
+    }
+
+    .stat-value.green { color: var(--green); }
+    .stat-value.red { color: var(--red); }
+    .stat-value.yellow { color: var(--yellow); }
+    .stat-value.accent { color: var(--accent); }
+
+    /* ── Feed ── */
+    .feed {
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .feed::-webkit-scrollbar { width: 4px; }
+    .feed::-webkit-scrollbar-track { background: transparent; }
+    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .feed-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 1rem;
+      color: var(--muted);
+    }
+
+    .feed-empty .icon { font-size: 3rem; opacity: 0.3; }
+    .feed-empty p { font-size: 0.8rem; letter-spacing: 0.05em; }
+
+    /* ── PR Card ── */
+    .pr-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      position: relative;
+      overflow: hidden;
+      animation: slideIn 0.3s ease;
+      transition: border-color 0.3s;
+    }
+
+    .pr-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+
+    .pr-card.status-close::before { background: var(--red); }
+    .pr-card.status-approve::before { background: var(--green); }
+    .pr-card.status-comment::before { background: var(--yellow); }
+    .pr-card.status-escalate::before { background: var(--accent); }
+    .pr-card.status-thinking::before {
+      background: var(--accent);
+      animation: thinking 1s ease-in-out infinite alternate;
+    }
+
+    @keyframes thinking {
+      from { opacity: 0.3; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .pr-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .pr-title {
+      font-family: var(--sans);
+      font-weight: 700;
+      font-size: 0.85rem;
+      line-height: 1.3;
+      flex: 1;
+    }
+
+    .pr-score {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .score-low { background: rgba(0, 229, 160, 0.15); color: var(--green); }
+    .score-mid { background: rgba(255, 194, 51, 0.15); color: var(--yellow); }
+    .score-high { background: rgba(255, 68, 102, 0.15); color: var(--red); }
+
+    .pr-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      font-size: 0.67rem;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+
+    .pr-meta span { display: flex; align-items: center; gap: 0.25rem; }
+
+    .pr-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.67rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-top: 0.6rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 3px;
+    }
+
+    .st-thinking { background: rgba(108,71,255,0.15); color: var(--accent); }
+    .st-close_pr, .st-close { background: rgba(255,68,102,0.15); color: var(--red); }
+    .st-approve_pr, .st-approve { background: rgba(0,229,160,0.15); color: var(--green); }
+    .st-post_comment, .st-comment { background: rgba(255,194,51,0.15); color: var(--yellow); }
+    .st-escalate { background: rgba(108,71,255,0.15); color: var(--accent); }
+
+    .signals-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      margin-top: 0.6rem;
+    }
+
+    .signal-tag {
+      font-size: 0.6rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.05);
+      color: var(--muted);
+    }
+
+    .signal-tag.hot { background: rgba(255,68,102,0.12); color: #ff7799; }
+
+    /* ── Log sidebar ── */
+    .log-panel {
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .log-panel::-webkit-scrollbar { width: 4px; }
+    .log-panel::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .log-header {
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .log-entry {
+      padding: 0.45rem 0;
+      border-bottom: 1px solid rgba(30,30,48,0.5);
+      font-size: 0.67rem;
+      line-height: 1.5;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .log-time { color: var(--muted); margin-right: 0.5rem; }
+    .log-type { font-weight: 600; margin-right: 0.4rem; }
+    .log-type.pr { color: var(--accent); }
+    .log-type.agent { color: var(--yellow); }
+    .log-type.action { color: var(--green); }
+    .log-type.err { color: var(--red); }
+    .log-msg { color: #a0a0c0; }
+
+    /* ── Token input modal ── */
+    .token-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(9,9,15,0.95);
+      backdrop-filter: blur(8px);
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .token-modal.hidden { display: none; }
+
+    .token-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2.5rem;
+      width: 100%;
+      max-width: 460px;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .token-box h2 {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: 1.3rem;
+    }
+
+    .token-box p { font-size: 0.75rem; color: var(--muted); line-height: 1.6; }
+
+    .token-box input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.75rem 1rem;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      outline: none;
+    }
+
+    .token-box input:focus { border-color: var(--accent); }
+
+    .token-box input::placeholder { color: var(--muted); }
+
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 0.75rem 1.5rem;
+      font-family: var(--sans);
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover { opacity: 0.85; }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 0.5rem 1rem;
+    }
+
+    .token-hint {
+      font-size: 0.67rem;
+      color: var(--muted);
+      font-family: var(--mono);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.6rem 0.8rem;
+    }
+
+    .score-bar {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      margin-top: 0.6rem;
+      overflow: hidden;
+    }
+
+    .score-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Token Modal -->
+<div class="token-modal" id="tokenModal">
+  <div class="token-box">
+    <h2>Connect to Agent</h2>
+    <p>Enter your dashboard JWT to connect to the WebSocket stream. Generate one with:</p>
+    <div class="token-hint">node shared/auth.js</div>
+    <input type="text" id="tokenInput" placeholder="eyJhbGciOiJIUzI1NiJ9..." />
+    <div style="display:flex;gap:0.5rem;">
+      <button class="btn" onclick="connect()">Connect</button>
+      <button class="btn btn-ghost" onclick="connectDemo()">Demo mode (no WS)</button>
+    </div>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-dot" id="logoDot"></div>
+    PR Agent
+  </div>
+  <div class="status-bar">
+    <div class="conn-indicator">
+      <div class="conn-dot" id="connDot"></div>
+      <span id="connLabel">disconnected</span>
+    </div>
+    <span id="clientCount">0 viewers</span>
+    <span id="clockEl"></span>
+  </div>
+</header>
+
+<main>
+  <!-- Stats strip -->
+  <div class="stats-strip">
+    <div class="stat">
+      <div class="stat-label">PRs Received</div>
+      <div class="stat-value accent" id="statTotal">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Closed (Spam)</div>
+      <div class="stat-value red" id="statClosed">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Approved</div>
+      <div class="stat-value green" id="statApproved">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Escalated</div>
+      <div class="stat-value yellow" id="statEscalated">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Avg Score</div>
+      <div class="stat-value" id="statAvgScore">—</div>
+    </div>
+  </div>
+
+  <!-- PR Feed -->
+  <div class="feed" id="feed">
+    <div class="feed-empty" id="feedEmpty">
+      <div class="icon">⌛</div>
+      <p>Waiting for pull requests...</p>
+    </div>
+  </div>
+
+  <!-- Log Panel -->
+  <div class="log-panel">
+    <div class="log-header">Event log</div>
+    <div id="logEntries"></div>
+  </div>
+</main>
+
+<script>
+  // ─── State ──────────────────────────────────────────────────────────────────
+  const state = {
+    prs: new Map(),   // prId → { ...prData, status, score, signals }
+    stats: { total: 0, closed: 0, approved: 0, escalated: 0, scores: [] },
+    ws: null,
+    demo: false,
+  };
+
+  // ─── DOM refs ────────────────────────────────────────────────────────────────
+  const feed = document.getElementById("feed");
+  const feedEmpty = document.getElementById("feedEmpty");
+  const logEntries = document.getElementById("logEntries");
+  const connDot = document.getElementById("connDot");
+  const connLabel = document.getElementById("connLabel");
+  const clientCount = document.getElementById("clientCount");
+
+  // ─── Clock ───────────────────────────────────────────────────────────────────
+  setInterval(() => {
+    document.getElementById("clockEl").textContent =
+      new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }, 1000);
+
+  // ─── Connect ─────────────────────────────────────────────────────────────────
+  function connect() {
+    const token = document.getElementById("tokenInput").value.trim();
+    if (!token) return;
+
+    const wsUrl = buildWsUrl(token);
+    initWS(wsUrl);
+    document.getElementById("tokenModal").classList.add("hidden");
+  }
+
+  function buildWsUrl(token) {
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const gatewayHost = location.port === "8081" ? `${location.hostname}:8080` : location.host;
+    return `${protocol}//${gatewayHost}/ws?token=${encodeURIComponent(token)}`;
+  }
+
+  function connectDemo() {
+    state.demo = true;
+    document.getElementById("tokenModal").classList.add("hidden");
+    setConnected(true);
+    log("demo", "agent", "Demo mode — injecting synthetic events");
+    runDemo();
+  }
+
+  function initWS(url) {
+    state.ws = new WebSocket(url);
+
+    state.ws.onopen = () => {
+      setConnected(true);
+      log("Connected to agent stream", "agent");
+    };
+
+    state.ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        handleEvent(msg);
+      } catch (e) {
+        console.error("WS parse error", e);
+      }
+    };
+
+    state.ws.onclose = (e) => {
+      setConnected(false);
+      log(`Disconnected (${e.code})`, "err");
+      setTimeout(() => initWS(url), 3000);
+    };
+
+    state.ws.onerror = () => setConnected(false);
+  }
+
+  function setConnected(v) {
+    connDot.className = "conn-dot" + (v ? " live" : " error");
+    connLabel.textContent = v ? "live" : "reconnecting...";
+  }
+
+  // ─── Event handler ───────────────────────────────────────────────────────────
+  function handleEvent({ stream, type, data, ts }) {
+    if (type === "connected") {
+      clientCount.textContent = `${data?.clientCount ?? 1} viewers`;
+      return;
+    }
+
+    switch (type) {
+      case "pr.received":
+        onPRReceived(data);
+        log(`PR #${data.number} received — ${data.repoFullName}`, "pr");
+        break;
+
+      case "pr.scored":
+        onPRScored(data);
+        log(`PR #${data.number} scored ${data.score}/100`, "pr");
+        break;
+
+      case "agent.thinking":
+        onAgentThinking(data);
+        log(`Agent thinking on PR #${data.number}...`, "agent");
+        break;
+
+      case "agent.decided":
+        onAgentDecided(data);
+        log(`PR #${data.number} → ${data.decision}`, "agent");
+        break;
+
+      case "action.executed":
+        onActionExecuted(data);
+        log(`Action executed: ${data.decision} on PR #${data.number}`, "action");
+        break;
+
+      case "agent.error":
+      case "action.error":
+        log(`Error on PR: ${data.error}`, "err");
+        break;
+    }
+  }
+
+  // ─── PR lifecycle handlers ────────────────────────────────────────────────────
+  function onPRReceived(data) {
+    state.stats.total++;
+    updateStats();
+    state.prs.set(data.id, { ...data, status: "received" });
+    renderCard(data.id);
+  }
+
+  function onPRScored(data) {
+    const pr = state.prs.get(data.id) ?? data;
+    state.prs.set(data.id, { ...pr, ...data, status: "scored" });
+    state.stats.scores.push(data.score);
+    updateStats();
+    renderCard(data.id);
+  }
+
+  function onAgentThinking(data) {
+    const pr = state.prs.get(data.prId);
+    if (pr) { pr.status = "thinking"; renderCard(data.prId); }
+  }
+
+  function onAgentDecided(data) {
+    const pr = state.prs.get(data.prId) ?? { id: data.prId };
+    state.prs.set(data.prId, { ...pr, ...data, status: data.decision });
+
+    if (data.decision === "close_pr" || data.decision === "close") state.stats.closed++;
+    else if (data.decision === "approve_pr" || data.decision === "approve") state.stats.approved++;
+    else if (data.decision === "escalate") state.stats.escalated++;
+
+    updateStats();
+    renderCard(data.prId);
+  }
+
+  function onActionExecuted(data) {
+    const pr = state.prs.get(data.prId);
+    if (pr) { pr.actionDone = true; renderCard(data.prId); }
+  }
+
+  // ─── Render card ─────────────────────────────────────────────────────────────
+  function renderCard(prId) {
+    feedEmpty.style.display = "none";
+    const pr = state.prs.get(prId);
+    if (!pr) return;
+
+    const existing = document.getElementById(`pr-${prId}`);
+    const card = buildCard(pr);
+
+    if (existing) {
+      existing.outerHTML = card;
+    } else {
+      feed.insertAdjacentHTML("afterbegin", card);
+    }
+  }
+
+  function buildCard(pr) {
+    const score = pr.score ?? 0;
+    const scoreClass = score >= 70 ? "score-high" : score >= 45 ? "score-mid" : "score-low";
+    const statusClass = `status-${pr.status ?? ""}`;
+    const stClass = `st-${pr.status ?? ""}`;
+    const stLabel = statusLabel(pr.status);
+
+    const signals = (pr.signals ?? []).map(s => {
+      const hot = s.score > 50;
+      return `<span class="signal-tag${hot ? " hot" : ""}">${s.name}: ${s.score}</span>`;
+    }).join("");
+
+    const scoreBarColor = score >= 70 ? "#ff4466" : score >= 45 ? "#ffc233" : "#00e5a0";
+    const number = pr.number ?? pr.prNumber ?? "?";
+    const repo = pr.repoFullName ?? pr.repo ?? "unknown/repo";
+    const title = escHtml(pr.title ?? "Untitled PR");
+    const author = escHtml(pr.author ?? "unknown");
+
+    return `
+<div class="pr-card ${statusClass}" id="pr-${pr.id}">
+  <div class="pr-card-header">
+    <div class="pr-title">${title}</div>
+    ${pr.score != null ? `<span class="pr-score ${scoreClass}">${score}/100</span>` : ""}
+  </div>
+  <div class="pr-meta">
+    <span>⎇ ${escHtml(repo)}</span>
+    <span>#${number}</span>
+    <span>👤 ${author}</span>
+    ${pr.additions != null ? `<span>+${pr.additions} -${pr.deletions}</span>` : ""}
+  </div>
+  ${pr.score != null ? `
+  <div class="score-bar">
+    <div class="score-bar-fill" style="width:${score}%;background:${scoreBarColor}"></div>
+  </div>` : ""}
+  ${signals ? `<div class="signals-row">${signals}</div>` : ""}
+  <div class="pr-status ${stClass}">${stLabel}</div>
+</div>`.trim();
+  }
+
+  function statusLabel(status) {
+    const map = {
+      received:    "⏳ Received",
+      scored:      "🔍 Scored",
+      thinking:    "🤔 Agent thinking...",
+      close_pr:    "🚫 Closed",
+      close:       "🚫 Closed",
+      approve_pr:  "✅ Approved",
+      approve:     "✅ Approved",
+      post_comment:"💬 Comment posted",
+      comment:     "💬 Comment posted",
+      escalate:    "🚨 Escalated",
+      error:       "❌ Error",
+    };
+    return map[status] ?? status ?? "⏳ Pending";
+  }
+
+  // ─── Log ─────────────────────────────────────────────────────────────────────
+  function log(msg, type = "pr") {
+    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+    entry.innerHTML = `<span class="log-time">${time}</span><span class="log-type ${type}">[${type}]</span><span class="log-msg">${escHtml(msg)}</span>`;
+    logEntries.insertBefore(entry, logEntries.firstChild);
+    // Cap at 200 log entries
+    while (logEntries.children.length > 200) logEntries.lastChild.remove();
+  }
+
+  // ─── Stats ───────────────────────────────────────────────────────────────────
+  function updateStats() {
+    document.getElementById("statTotal").textContent = state.stats.total;
+    document.getElementById("statClosed").textContent = state.stats.closed;
+    document.getElementById("statApproved").textContent = state.stats.approved;
+    document.getElementById("statEscalated").textContent = state.stats.escalated;
+    if (state.stats.scores.length) {
+      const avg = Math.round(state.stats.scores.reduce((a, b) => a + b, 0) / state.stats.scores.length);
+      const el = document.getElementById("statAvgScore");
+      el.textContent = avg;
+      el.className = "stat-value " + (avg >= 70 ? "red" : avg >= 45 ? "yellow" : "green");
+    }
+  }
+
+  // ─── Demo mode ───────────────────────────────────────────────────────────────
+  function runDemo() {
+    const fakePRs = [
+      { id: "01DEMO1", number: 101, title: "fix: correct typo in README", author: "alice", repoFullName: "org/myrepo", additions: 2, deletions: 1, score: 12, authorAssociation: "CONTRIBUTOR" },
+      { id: "01DEMO2", number: 102, title: "update", author: "spambot99", repoFullName: "org/myrepo", additions: 0, deletions: 0, score: 88, authorAssociation: "NONE" },
+      { id: "01DEMO3", number: 103, title: "Add new feature for better UX", author: "bob", repoFullName: "org/myrepo", additions: 145, deletions: 30, score: 52, authorAssociation: "FIRST_TIME_CONTRIBUTOR" },
+    ];
+
+    const fakeSignals = [
+      [{ name: "title_quality", score: 5, weight: 1.2, detail: "ok" }, { name: "body_quality", score: 0, weight: 1, detail: "ok" }],
+      [{ name: "spam_keywords", score: 90, weight: 1.5, detail: "2 patterns matched" }, { name: "diff_size", score: 50, weight: 0.9, detail: "no real changes" }, { name: "body_quality", score: 60, weight: 1, detail: "empty body" }],
+      [{ name: "author_association", score: 40, weight: 0.8, detail: "FIRST_TIME_CONTRIBUTOR" }, { name: "body_quality", score: 30, weight: 1, detail: "very short body" }],
+    ];
+
+    const decisions = ["approve_pr", "close_pr", "post_comment"];
+
+    fakePRs.forEach((pr, i) => {
+      setTimeout(() => {
+        handleEvent({ type: "pr.received", data: { ...pr, body: "", createdAt: new Date().toISOString() } });
+        setTimeout(() => {
+          handleEvent({ type: "pr.scored", data: { ...pr, signals: fakeSignals[i], detectedAt: new Date().toISOString() } });
+          setTimeout(() => {
+            handleEvent({ type: "agent.thinking", data: { prId: pr.id, number: pr.number, repo: pr.repoFullName } });
+            setTimeout(() => {
+              handleEvent({ type: "agent.decided", data: { prId: pr.id, number: pr.number, repo: pr.repoFullName, decision: decisions[i], commentBody: "Auto decision comment." } });
+            }, 2000 + i * 500);
+          }, 1500);
+        }, 1000);
+      }, i * 3000);
+    });
+  }
+
+  // ─── Utils ───────────────────────────────────────────────────────────────────
+  function escHtml(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  const initialToken = new URLSearchParams(location.search).get("token");
+  if (initialToken) {
+    document.getElementById("tokenInput").value = initialToken;
+    connect();
+  }
+</script>
+</body>
+</html>

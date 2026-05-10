@@ -1,0 +1,40 @@
+# docker-compose.override.yml
+# Automatically merged with docker-compose.yml in dev.
+
+services:
+  detection-service:
+    command: ["node", "--watch", "src/index.js"]
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./services/detection/src:/app/src
+
+  agent:
+    command: ["python", "-u", "main.py"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./agent/src:/app/src
+      - ./agent/main.py:/app/main.py
+
+  github-action-service:
+    command: ["node", "--watch", "src/index.js"]
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./services/github-action/src:/app/src
+
+  ws-broadcaster:
+    command: ["node", "--watch", "src/index.js"]
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./services/ws-broadcaster/src:/app/src
+
+  dashboard:
+    image: nginx:alpine
+    ports:
+      - "8081:80"
+    volumes:
+      - ./dashboard:/usr/share/nginx/html:ro
+    restart: unless-stopped

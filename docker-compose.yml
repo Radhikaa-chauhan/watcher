@@ -1,0 +1,103 @@
+services:
+  # ─────────────────────────────────────────────
+  # Infrastructure
+  # ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # API Gateway (Nginx)
+  # ─────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - detection-service
+      - ws-broadcaster
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Detection Service (Node.js)
+  # ─────────────────────────────────────────────
+  detection-service:
+    build:
+      context: ./services/detection
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - PORT=${DETECTION_SERVICE_PORT:-3001}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # LangGraph Agent (Python)
+  # ─────────────────────────────────────────────
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - AGENT_MODEL=${AGENT_MODEL:-llama-3.3-70b-versatile}
+      - SPAM_SCORE_THRESHOLD=${SPAM_SCORE_THRESHOLD:-70}
+      - UNSURE_SCORE_LOW=${UNSURE_SCORE_LOW:-50}
+      - UNSURE_SCORE_HIGH=${UNSURE_SCORE_HIGH:-70}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # GitHub Action Service (Node.js)
+  # ─────────────────────────────────────────────
+  github-action-service:
+    build:
+      context: ./services/github-action
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PORT=${GITHUB_ACTION_SERVICE_PORT:-3002}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # WebSocket Broadcaster (Node.js)
+  # ─────────────────────────────────────────────
+  ws-broadcaster:
+    build:
+      context: ./services/ws-broadcaster
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - PORT=${WS_BROADCASTER_PORT:-3003}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
