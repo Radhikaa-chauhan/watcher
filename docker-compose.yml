@@ -23,13 +23,17 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
+    environment:
+      - PORT=8080
+      - DETECTION_SERVICE_HOSTPORT=detection-service:3001
+      - WS_BROADCASTER_HOSTPORT=ws-broadcaster:3003
     ports:
       - "8080:8080"
     depends_on:
       - detection-service
       - ws-broadcaster
     volumes:
-      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf.template:ro
     restart: unless-stopped
 
   # ─────────────────────────────────────────────

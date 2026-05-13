@@ -1,0 +1,99 @@
+services:
+  - type: keyvalue
+    name: watcher-redis
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+  - type: pserv
+    name: detection-service
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./services/detection/Dockerfile
+    dockerContext: ./services/detection
+    envVars:
+      - key: PORT
+        value: "3001"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: watcher-redis
+          property: connectionString
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+
+  - type: pserv
+    name: ws-broadcaster
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./services/ws-broadcaster/Dockerfile
+    dockerContext: ./services/ws-broadcaster
+    envVars:
+      - key: PORT
+        value: "3003"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: watcher-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+  - type: worker
+    name: github-action-service
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./services/github-action/Dockerfile
+    dockerContext: ./services/github-action
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: watcher-redis
+          property: connectionString
+      - key: GITHUB_TOKEN
+        sync: false
+
+  - type: worker
+    name: agent
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./agent/Dockerfile
+    dockerContext: ./agent
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: watcher-redis
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: AGENT_MODEL
+        value: "llama-3.3-70b-versatile"
+      - key: SPAM_SCORE_THRESHOLD
+        value: "70"
+      - key: UNSURE_SCORE_LOW
+        value: "50"
+      - key: UNSURE_SCORE_HIGH
+        value: "70"
+
+  - type: web
+    name: gateway
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./gateway/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: DETECTION_SERVICE_HOSTPORT
+        fromService:
+          type: pserv
+          name: detection-service
+          property: hostport
+      - key: WS_BROADCASTER_HOSTPORT
+        fromService:
+          type: pserv
+          name: ws-broadcaster
+          property: hostport
